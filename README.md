@@ -58,4 +58,4 @@ If you use this code in your research, please cite the following paper:
 
 ## License
 
-<!-- TODO -->
+This project is licensed under the MIT License. See the [LICENSE.md](LICENSE.md) file for details.

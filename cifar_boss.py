@@ -407,7 +407,7 @@ def objective(trial):
     weight_decay = trial.suggest_loguniform('weight_decay', 0.00001, 0.01)
     momentum = trial.suggest_loguniform('momentum', 0.001, 1.0)
     train_batch = trial.suggest_int('batch', 64, 256)
-    alpha = trial.suggest_categorical('alpha', [0.25, 0.5, 0.75])
+    alpha = trial.suggest_uniform('alpha', 0.0, 1.0)
 
     args.lr = lr
     args.weight_decay = weight_decay

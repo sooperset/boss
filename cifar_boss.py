@@ -91,9 +91,6 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--no-progress-bar', action='store_true',
                     help='Disable the progress bar')
-#Device options
-parser.add_argument('--gpu-id', default='0,1,2,3', type=str,
-                    help='id(s) for CUDA_VISIBLE_DEVICES')
 
 # Distillation
 parser.add_argument('--alpha', type=float, default=0.5)
@@ -137,7 +134,6 @@ def main(trial_number, gpu_id):
 
 
     # Data
-    # print('==> Preparing dataset %s' % args.dataset)
     transform_train = transforms.Compose([
         transforms.Resize(32),
         transforms.RandomCrop(32, padding=4),
@@ -168,7 +164,6 @@ def main(trial_number, gpu_id):
     testloader = data.DataLoader(testset, batch_size=args.test_batch, shuffle=False, num_workers=args.workers, pin_memory=True, persistent_workers=True, multiprocessing_context=multiprocessing_context)
 
     # Model
-    # print("==> creating model '{}'".format(args.arch))
     if args.arch.startswith('resnext'):
         model = models.__dict__[args.arch](
                     cardinality=args.cardinality,
@@ -226,9 +221,6 @@ def main(trial_number, gpu_id):
             t_model.load_state_dict(t_state_dict)
             print(f'Load teacher model from {t_trial_ckpt_path}')
 
-            # args.epochs = args.epochs // 2
-            print(f'Reduce epochs by half : {args.epochs}')
-
             args.alpha = float(args.alpha)
             print(f'Update alpha : {args.alpha}')
         else:
@@ -237,11 +229,8 @@ def main(trial_number, gpu_id):
             t_model.load_state_dict(t_state_dict)
             print(f'Load teacher model from {t_trial_ckpt_path}')
         t_model = t_model.to(device)
-    
-    # model = torch.nn.DataParallel(model).cuda()
 
     cudnn.benchmark = True
-    # print('    Total params: %.2fM' % /(sum(p.numel() for p in s_model.parameters())/1000000.0))
 
     optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=1 - args.momentum, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, args.epochs)
@@ -260,8 +249,6 @@ def main(trial_number, gpu_id):
     # Train and val
     for epoch in range(start_epoch, args.epochs):
         state['lr'] = scheduler.get_last_lr()[0]
-
-        # print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, args.epochs, state['lr']))
 
         train_loss, train_acc = train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, epoch, use_cuda, device, trial_number)
         test_loss, test_acc = test(testloader, s_model, ce_criterion, epoch, use_cuda, device)
@@ -284,7 +271,6 @@ def main(trial_number, gpu_id):
 
     logger.close()
 
-    # print(f'Best acc: {best_acc}')
     best_checkpoint = os.path.join(args.checkpoint, f'trial_{trial_number}', 'model_best.pth.tar')
     return best_acc, best_checkpoint
 
@@ -428,7 +414,6 @@ def save_checkpoint(state, is_best, trial_number, checkpoint='checkpoint', filen
 
 def objective(trial):
     gpu_id = trial.number % torch.cuda.device_count()
-    args.gpu_id = str(gpu_id)
 
     lr = trial.suggest_loguniform('lr', 0.001, 1.0)
     weight_decay = trial.suggest_loguniform('weight_decay', 0.00001, 0.01)

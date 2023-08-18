@@ -94,8 +94,6 @@ parser.add_argument('--no-progress-bar', action='store_true',
 
 # Distillation
 parser.add_argument('--alpha', type=float, default=0.5)
-parser.add_argument('--loss-type', type=str, default='l2')
-parser.add_argument('--temperature', type=float, default=1)
 parser.add_argument('--top-k', default=8, type=int, metavar='N')
 
 # BOSS-specific arguments
@@ -235,13 +233,7 @@ def main(trial_number, gpu_id):
     optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=1 - args.momentum, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, args.epochs)
     ce_criterion = nn.CrossEntropyLoss()
-
-    if args.loss_type == 'l2':
-        consist_criterion = nn.MSELoss()
-    elif args.loss_type == 'kl':
-        consist_criterion = nn.KLDivLoss(reduction='batchmean')
-    else:
-        raise NotImplementedError
+    consist_criterion = nn.MSELoss()
 
     logger = Logger(os.path.join(args.checkpoint, f'trial_{trial_number}', 'log.txt'), title=f"{args.dataset}_{args.arch}")
     logger.set_names(['Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
@@ -305,11 +297,7 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
         if t_model:
             with torch.no_grad():
                 t_outputs = t_model(inputs)
-        
-            if args.loss_type == 'l2':
-                consist_loss = consist_criterion(s_outputs, t_outputs)
-            else:
-                consist_loss = consist_criterion(F.log_softmax(s_outputs / args.temperature, dim=1), F.softmax(t_outputs / args.temperature, dim=1)).sum(-1)
+            consist_loss = consist_criterion(s_outputs, t_outputs)
 
             alpha = args.alpha
             loss = ce_loss * alpha + (1 - alpha) * consist_loss

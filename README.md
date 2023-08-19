@@ -35,8 +35,8 @@ sudo apt-get update && sudo apt-get install sqlite3 libsqlite3-dev
 ### Training and Evaluation
 
 ```bash
-python cifar.py -a vgg16_bn -d cifar100 --manualSeed 888  # baseline
-python cifar_boss.py -a vgg16_bn -d cifar100 --pretrained --manualSeed 888 --no-progress-bar  # BOSS
+python cifar.py --arch vgg16_bn --dataset cifar100 --manualSeed 888  # baseline
+python cifar_boss.py --arch vgg16_bn --dataset cifar100 --manualSeed 888 # BOSS
 ```
 
 ## Acknowledgement

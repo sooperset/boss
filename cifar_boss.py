@@ -3,6 +3,7 @@ import subprocess
 import time
 import optuna
 import argparse
+import torch
 
 def run_trial(gpu_id: int, seed: int, study_name: str, storage_path: str, arch: str, dataset: str):
     command = f"python single_trial.py -a {arch} -d {dataset} --manualSeed={seed} --pretrained --workers=4 --gpu-id={gpu_id} --study-name={study_name} --storage={storage_path}"
@@ -35,14 +36,17 @@ if __name__ == "__main__":
                         help='Total number of trials to run')
     args = parser.parse_args()
 
+    num_gpus = torch.cuda.device_count()
+    print(f"Number of available GPUs: {num_gpus} [Recommended: 8]")
+
     active_trials = 0
 
     ensure_study(args.study_name, args.storage_path)
 
-    processes = [None] * 8
+    processes = [None] * num_gpus
 
     while active_trials < args.total_trials:
-        for i in range(8):
+        for i in range(num_gpus):
             if processes[i] is None or processes[i].poll() is not None:
                 if active_trials < args.total_trials:
                     processes[i] = run_trial(i, args.manualSeed, args.study_name, args.storage_path, args.arch, args.dataset)

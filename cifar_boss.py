@@ -11,7 +11,6 @@ from joblib.externals.loky.backend.context import get_context
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
@@ -20,7 +19,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import models.cifar as models
 
-from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig
+from utils import Logger, AverageMeter, accuracy, mkdir_p
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -89,8 +88,6 @@ parser.add_argument('--compressionRate', type=int, default=2, help='Compression 
 parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
-parser.add_argument('--no-progress-bar', action='store_true',
-                    help='Disable the progress bar')
 
 # Distillation
 parser.add_argument('--alpha', type=float, default=0.5)
@@ -118,14 +115,14 @@ torch.manual_seed(args.manualSeed)
 if use_cuda:
     torch.cuda.manual_seed_all(args.manualSeed)
 
-def main(trial_number, gpu_id):
+def main(trial_number, gpu_id, trial_args):
     best_acc = 0
-    start_epoch = args.start_epoch
+    start_epoch = trial_args.start_epoch
 
-    is_warmup_trial = trial_number < args.warmup_trials
-    is_pretrained_mode = args.pretrained_mode
+    is_warmup_trial = trial_number < trial_args.warmup_trials
+    is_pretrained_mode = trial_args.pretrained_mode
 
-    trial_path = os.path.join(args.checkpoint, f'trial_{trial_number}')
+    trial_path = os.path.join(trial_args.checkpoint, f'trial_{trial_number}')
     if not os.path.isdir(trial_path):
         mkdir_p(trial_path)
 
@@ -145,7 +142,7 @@ def main(trial_number, gpu_id):
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
-    if args.dataset == 'cifar10':
+    if trial_args.dataset == 'cifar10':
         dataloader = datasets.CIFAR10
         num_classes = 10
     else:
@@ -156,43 +153,13 @@ def main(trial_number, gpu_id):
 
     data_path = f'./data/gpu{gpu_id}'
     trainset = dataloader(root=data_path, train=True, download=True, transform=transform_train)
-    trainloader = data.DataLoader(trainset, batch_size=args.train_batch, shuffle=True, num_workers=args.workers, pin_memory=True, persistent_workers=True, multiprocessing_context=multiprocessing_context)
+    trainloader = data.DataLoader(trainset, batch_size=trial_args.train_batch, shuffle=True, num_workers=trial_args.workers, pin_memory=True, persistent_workers=True, multiprocessing_context=multiprocessing_context)
 
     testset = dataloader(root=data_path, train=False, download=False, transform=transform_test)
-    testloader = data.DataLoader(testset, batch_size=args.test_batch, shuffle=False, num_workers=args.workers, pin_memory=True, persistent_workers=True, multiprocessing_context=multiprocessing_context)
+    testloader = data.DataLoader(testset, batch_size=trial_args.test_batch, shuffle=False, num_workers=trial_args.workers, pin_memory=True, persistent_workers=True, multiprocessing_context=multiprocessing_context)
 
     # Model
-    if args.arch.startswith('resnext'):
-        model = models.__dict__[args.arch](
-                    cardinality=args.cardinality,
-                    num_classes=num_classes,
-                    depth=args.depth,
-                    widen_factor=args.widen_factor,
-                    dropRate=args.drop,
-                )
-    elif args.arch.startswith('densenet'):
-        model = models.__dict__[args.arch](
-                    num_classes=num_classes,
-                    depth=args.depth,
-                    growthRate=args.growthRate,
-                    compressionRate=args.compressionRate,
-                    dropRate=args.drop,
-                )
-    elif args.arch.startswith('wrn'):
-        model = models.__dict__[args.arch](
-                    num_classes=num_classes,
-                    depth=args.depth,
-                    widen_factor=args.widen_factor,
-                    dropRate=args.drop,
-                )
-    elif args.arch.endswith('resnet'):
-        model = models.__dict__[args.arch](
-                    num_classes=num_classes,
-                    depth=args.depth,
-                    block_name=args.block_name,
-                )
-    else:
-        model = models.__dict__[args.arch](num_classes=num_classes)
+    model = models.__dict__[trial_args.arch](num_classes=num_classes)
 
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
 
@@ -203,7 +170,7 @@ def main(trial_number, gpu_id):
     if not is_warmup_trial:
         import random
         completed_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
-        top_k_trials = sorted(completed_trials, key=lambda x: x.user_attrs["score"], reverse=True)[:args.top_k]
+        top_k_trials = sorted(completed_trials, key=lambda x: x.user_attrs["score"], reverse=True)[:trial_args.top_k]
         top_k_checkpoint_paths = [trial.user_attrs["checkpoint_path"] for trial in top_k_trials]
 
         t_model = deepcopy(model)
@@ -219,8 +186,8 @@ def main(trial_number, gpu_id):
             t_model.load_state_dict(t_state_dict)
             print(f'Load teacher model from {t_trial_ckpt_path}')
 
-            args.alpha = float(args.alpha)
-            print(f'Update alpha : {args.alpha}')
+            trial_args.alpha = float(trial_args.alpha)
+            print(f'Update alpha : {trial_args.alpha}')
         else:
             t_trial_ckpt_path = random.choice(top_k_checkpoint_paths)
             t_state_dict = torch.load(t_trial_ckpt_path)['state_dict']
@@ -230,20 +197,20 @@ def main(trial_number, gpu_id):
 
     cudnn.benchmark = True
 
-    optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=1 - args.momentum, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, args.epochs)
+    optimizer = optim.SGD(s_model.parameters(), lr=trial_args.lr, momentum=1 - trial_args.momentum, weight_decay=trial_args.weight_decay)
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, trial_args.epochs)
     ce_criterion = nn.CrossEntropyLoss()
     consist_criterion = nn.MSELoss()
 
-    logger = Logger(os.path.join(args.checkpoint, f'trial_{trial_number}', 'log.txt'), title=f"{args.dataset}_{args.arch}")
+    logger = Logger(os.path.join(trial_args.checkpoint, f'trial_{trial_number}', 'log.txt'), title=f"{trial_args.dataset}_{trial_args.arch}")
     logger.set_names(['Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
 
     # Train and val
-    for epoch in range(start_epoch, args.epochs):
+    for epoch in range(start_epoch, trial_args.epochs):
         state['lr'] = scheduler.get_last_lr()[0]
 
-        train_loss, train_acc = train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, epoch, use_cuda, device, trial_number)
-        test_loss, test_acc = test(testloader, s_model, ce_criterion, epoch, use_cuda, device)
+        train_loss, train_acc = train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, epoch, use_cuda, device, trial_number, trial_args)
+        test_loss, test_acc = test(testloader, s_model, ce_criterion, epoch, use_cuda, device, trial_args)
 
         # append logger file
         logger.append([state['lr'], train_loss, test_loss, train_acc, test_acc])
@@ -257,16 +224,16 @@ def main(trial_number, gpu_id):
                 'acc': test_acc,
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
-            }, is_best, trial_number, checkpoint=args.checkpoint)
+            }, is_best, trial_number, checkpoint=trial_args.checkpoint)
 
         scheduler.step()
 
     logger.close()
 
-    best_checkpoint = os.path.join(args.checkpoint, f'trial_{trial_number}', 'model_best.pth.tar')
+    best_checkpoint = os.path.join(trial_args.checkpoint, f'trial_{trial_number}', 'model_best.pth.tar')
     return best_acc, best_checkpoint
 
-def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, epoch, use_cuda, device, trial_number):
+def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, epoch, use_cuda, device, trial_number, trial_args):
     # switch to train mode
     s_model.train()
 
@@ -280,8 +247,6 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
     top5 = AverageMeter()
     end = time.time()
 
-    if not args.no_progress_bar:
-        bar = Bar('Processing', max=len(trainloader))
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -299,7 +264,7 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
                 t_outputs = t_model(inputs)
             consist_loss = consist_criterion(s_outputs, t_outputs)
 
-            alpha = args.alpha
+            alpha = trial_args.alpha
             loss = ce_loss * alpha + (1 - alpha) * consist_loss
         else:
             loss = ce_loss
@@ -319,26 +284,9 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
         batch_time.update(time.time() - end)
         end = time.time()
 
-        # plot progress
-        if not args.no_progress_bar:
-            bar.suffix  = '({batch}/{size}) trial: {trial:3d} | Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | CE Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
-                        batch=batch_idx + 1,
-                        size=len(trainloader),
-                        trial=trial_number,
-                        data=data_time.avg,
-                        bt=batch_time.avg,
-                        total=bar.elapsed_td,
-                        eta=bar.eta_td,
-                        loss=ce_losses.avg,
-                        top1=top1.avg,
-                        top5=top5.avg,
-                        )
-            bar.next()
-    if not args.no_progress_bar:
-        bar.finish()
     return (ce_losses.avg, top1.avg)
 
-def test(testloader, model, criterion, epoch, use_cuda, device):
+def test(testloader, model, criterion, epoch, use_cuda, device, trial_args):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -349,8 +297,6 @@ def test(testloader, model, criterion, epoch, use_cuda, device):
     model.eval()
 
     end = time.time()
-    if not args.no_progress_bar:
-        bar = Bar('Processing', max=len(testloader))
     for batch_idx, (inputs, targets) in enumerate(testloader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -372,24 +318,6 @@ def test(testloader, model, criterion, epoch, use_cuda, device):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-
-        # plot progress
-        if not args.no_progress_bar:
-            bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
-                        batch=batch_idx + 1,
-                        size=len(testloader),
-                        data=data_time.avg,
-                        bt=batch_time.avg,
-                        total=bar.elapsed_td,
-                        eta=bar.eta_td,
-                        loss=losses.avg,
-                        top1=top1.avg,
-                        top5=top5.avg,
-                        )
-            bar.next()
-
-    if not args.no_progress_bar:
-        bar.finish()
     return (losses.avg, top1.avg)
 
 def save_checkpoint(state, is_best, trial_number, checkpoint='checkpoint', filename='checkpoint.pth.tar'):
@@ -400,29 +328,28 @@ def save_checkpoint(state, is_best, trial_number, checkpoint='checkpoint', filen
     if is_best:
         shutil.copyfile(filepath, os.path.join(trial_path, 'model_best.pth.tar'))
 
+def generate_trial_args(trial, base_args):
+    trial_args = deepcopy(base_args)
+    trial_args.lr = trial.suggest_loguniform('lr', 0.001, 1.0)
+    trial_args.weight_decay = trial.suggest_loguniform('weight_decay', 0.00001, 0.01)
+    trial_args.momentum = trial.suggest_loguniform('momentum', 0.001, 1.0)
+    trial_args.train_batch = trial.suggest_int('batch', 64, 256)
+    trial_args.alpha = trial.suggest_uniform('alpha', 0.0, 1.0)
+    return trial_args
+
 def objective(trial):
     gpu_id = trial.number % torch.cuda.device_count()
 
-    lr = trial.suggest_loguniform('lr', 0.001, 1.0)
-    weight_decay = trial.suggest_loguniform('weight_decay', 0.00001, 0.01)
-    momentum = trial.suggest_loguniform('momentum', 0.001, 1.0)
-    train_batch = trial.suggest_int('batch', 64, 256)
-    alpha = trial.suggest_uniform('alpha', 0.0, 1.0)
+    trial_args = generate_trial_args(trial, args)
 
-    args.lr = lr
-    args.weight_decay = weight_decay
-    args.momentum = momentum
-    args.train_batch = train_batch
-    args.alpha = alpha
-
-    acc, checkpoint_path = main(trial.number, gpu_id)
+    acc, checkpoint_path = main(trial.number, gpu_id, trial_args)
     trial.set_user_attr("score", acc)
     trial.set_user_attr("checkpoint_path", checkpoint_path)
 
     return acc
 
 if __name__ == '__main__':
-    study.optimize(objective, n_trials=args.num_total_trial, n_jobs=torch.cuda.device_count())
+    study.optimize(objective, n_trials=args.num_total_trial, n_jobs=4)
 
     print('Number of finished trials: ', len(study.trials))
     print('Best trial:')

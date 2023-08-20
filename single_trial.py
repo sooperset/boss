@@ -195,7 +195,8 @@ def main(trial_number):
             print(f"[Trial {trial.number}] Loaded student model ({s_trial_ckpt_path.split('/')[-2]}) and teacher model ({t_trial_ckpt_path.split('/')[-2]}). Alpha: {args.alpha:.2f}")
         else:
             # Load a random teacher model
-            t_trial_ckpt_path = random.choice(top_k_checkpoint_paths)
+            trial_random = random.Random(trial_number)
+            t_trial_ckpt_path = trial_random.choice(top_k_checkpoint_paths)
             t_state_dict = torch.load(t_trial_ckpt_path)['state_dict']
             t_model.load_state_dict(t_state_dict)
 

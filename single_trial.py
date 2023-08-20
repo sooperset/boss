@@ -178,7 +178,8 @@ def main(trial_number):
 
         if is_pretrained_mode:
             # Select two random IDs for student and teacher models
-            selected_ids = random.sample(range(len(top_k_checkpoint_paths)), 2)
+            trial_random = random.Random(trial_number)
+            selected_ids = trial_random.sample(range(len(top_k_checkpoint_paths)), 2)
 
             # Load the student model
             s_trial_ckpt_path = top_k_checkpoint_paths[selected_ids[0]]
@@ -191,7 +192,7 @@ def main(trial_number):
             t_model.load_state_dict(t_state_dict)
 
             # Print loaded paths
-            print(f"[Trial {trial.number}] Loaded student model from {s_trial_ckpt_path.split('/')[-2]} and teacher model from {t_trial_ckpt_path.split('/')[-2]}. Alpha updated to {args.alpha:.2f}")
+            print(f"[Trial {trial.number}] Loaded student model ({s_trial_ckpt_path.split('/')[-2]}) and teacher model ({t_trial_ckpt_path.split('/')[-2]}). Alpha: {args.alpha:.2f}")
         else:
             # Load a random teacher model
             t_trial_ckpt_path = random.choice(top_k_checkpoint_paths)
@@ -199,7 +200,7 @@ def main(trial_number):
             t_model.load_state_dict(t_state_dict)
 
             # Print loaded path
-            print(f"[Trial {trial.number}] Loaded teacher model from {t_trial_ckpt_path.split('/')[-2]}")
+            print(f"[Trial {trial.number}] Loaded teacher model ({t_trial_ckpt_path.split('/')[-2]}). Alpha: {args.alpha:.2f}")
 
         t_model = t_model.to(device)
 

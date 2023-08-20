@@ -162,39 +162,53 @@ def main(trial_number):
 
     device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
 
-    s_model = deepcopy(model)
-    s_model = s_model.to(device)
-
+    s_model = deepcopy(model).to(device)
     t_model = None
+
+    # Logic for non-warmup trials
     if not is_warmup_trial:
         import random
+
+        # Get completed trials and sort by score
         completed_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
         top_k_trials = sorted(completed_trials, key=lambda x: x.user_attrs["score"], reverse=True)[:args.top_k]
         top_k_checkpoint_paths = [trial.user_attrs["checkpoint_path"] for trial in top_k_trials]
 
         t_model = deepcopy(model)
+
         if is_pretrained_mode:
+            # Select two random IDs for student and teacher models
             selected_ids = random.sample(range(len(top_k_checkpoint_paths)), 2)
+
+            # Load the student model
             s_trial_ckpt_path = top_k_checkpoint_paths[selected_ids[0]]
             s_state_dict = torch.load(s_trial_ckpt_path)['state_dict']
             s_model.load_state_dict(s_state_dict)
 
+            # Load the teacher model
             t_trial_ckpt_path = top_k_checkpoint_paths[selected_ids[1]]
             t_state_dict = torch.load(t_trial_ckpt_path)['state_dict']
             t_model.load_state_dict(t_state_dict)
-            print(f"[Trial {trial.number}] Loaded student model from {s_trial_ckpt_path.split('/')[-2]} and teacher model from {t_trial_ckpt_path.split('/')[-2]}. Alpha updated to {args.alpha:.2f}")
 
+            # Print loaded paths
+            print(f"[Trial {trial.number}] Loaded student model from {s_trial_ckpt_path.split('/')[-2]} and teacher model from {t_trial_ckpt_path.split('/')[-2]}. Alpha updated to {args.alpha:.2f}")
         else:
+            # Load a random teacher model
             t_trial_ckpt_path = random.choice(top_k_checkpoint_paths)
             t_state_dict = torch.load(t_trial_ckpt_path)['state_dict']
             t_model.load_state_dict(t_state_dict)
+
+            # Print loaded path
             print(f"[Trial {trial.number}] Loaded teacher model from {t_trial_ckpt_path.split('/')[-2]}")
+
         t_model = t_model.to(device)
 
     cudnn.benchmark = True
 
     optimizer = optim.SGD(s_model.parameters(), lr=args.lr, momentum=1 - args.momentum, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, args.epochs)
+
+    # Create loss criteria
     ce_criterion = nn.CrossEntropyLoss()
     consist_criterion = nn.MSELoss()
 
@@ -251,10 +265,11 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
             inputs, targets = inputs.to(device), targets.to(device)
         inputs, targets = torch.autograd.Variable(inputs), torch.autograd.Variable(targets)
 
-        # compute output
+        # Compute student model's output
         s_outputs = s_model(inputs)
         ce_loss = ce_criterion(s_outputs, targets)
 
+        # After warmup trials, compute teacher model's output and calculate consistency loss
         if t_model:
             with torch.no_grad():
                 t_outputs = t_model(inputs)
@@ -327,36 +342,36 @@ def save_checkpoint(state, is_best, trial_number, checkpoint='checkpoint', filen
 if __name__ == '__main__':
     trial = study.ask()
     trial_number = trial.number
-    
+
+    # Suggest hyperparameters
     args.lr = trial.suggest_loguniform('lr', 0.001, 1.0)
     args.weight_decay = trial.suggest_loguniform('weight_decay', 0.00001, 0.01)
     args.momentum = trial.suggest_loguniform('momentum', 0.001, 1.0)
     args.train_batch = trial.suggest_int('batch', 64, 256)
+
+    # Suggest alpha hyperparameter if it's not a warmup trial
     if trial.number >= args.warmup_trials:
         args.alpha = trial.suggest_float('alpha', 0.0, 1.0)
 
+    # Run the main trial function
     acc, checkpoint_path = main(trial_number)
 
+    # Record trial results
     trial.set_user_attr("score", acc)
     trial.set_user_attr("checkpoint_path", checkpoint_path)
-
     study.tell(trial, acc)
 
+    # Retrieve the best trial
     best_trial = study.best_trial
 
-    text = (
-        f"[Current Result, Trial {trial.number}] "
-        f"LR={args.lr:.6f}, "
-        f"Weight Decay={args.weight_decay:.4f}, "
-        f"Momentum={args.momentum:.4f}, "
-        f"Train Batch={args.train_batch}"
-    )
+    # Construct and print result summary
+    text = f"[Current Result, Trial {trial.number}] "
+    text += f"LR={args.lr:.6f}, Weight Decay={args.weight_decay:.4f}, "
+    text += f"Momentum={args.momentum:.4f}, Train Batch={args.train_batch}"
+
     if trial.number >= args.warmup_trials:
         text += f", Alpha={args.alpha:.2f}"
 
-    text += (
-        f" ACC: {acc:.4f} | [Best Result, Trial {best_trial.number}] "
-        f"ACC: {best_trial.value:.4f}"
-    )
+    text += f" ACC: {acc:.4f} | [Best Result, Trial {best_trial.number}] ACC: {best_trial.value:.4f}"
 
     print(text)

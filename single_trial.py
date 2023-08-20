@@ -33,7 +33,7 @@ parser.add_argument('-d', '--dataset', default='cifar100', type=str)
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 # Optimization options
-parser.add_argument('--epochs', default=164, type=int, metavar='N',
+parser.add_argument('--epochs', default=3, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -182,15 +182,13 @@ def main(trial_number):
             t_trial_ckpt_path = top_k_checkpoint_paths[selected_ids[1]]
             t_state_dict = torch.load(t_trial_ckpt_path)['state_dict']
             t_model.load_state_dict(t_state_dict)
-
-            args.alpha = float(args.alpha)
-            print(f"[Trial {trial.number}] Loaded student model from {s_trial_ckpt_path} and teacher model from {t_trial_ckpt_path}. Alpha updated to {args.alpha:.2f}")
+            print(f"[Trial {trial.number}] Loaded student model from {s_trial_ckpt_path.split('/')[-2]} and teacher model from {t_trial_ckpt_path.split('/')[-2]}. Alpha updated to {args.alpha:.2f}")
 
         else:
             t_trial_ckpt_path = random.choice(top_k_checkpoint_paths)
             t_state_dict = torch.load(t_trial_ckpt_path)['state_dict']
             t_model.load_state_dict(t_state_dict)
-            print(f"[Trial {trial.number}] Loaded teacher model from {t_trial_ckpt_path}")
+            print(f"[Trial {trial.number}] Loaded teacher model from {t_trial_ckpt_path.split('/')[-2]}")
         t_model = t_model.to(device)
 
     cudnn.benchmark = True
@@ -207,8 +205,8 @@ def main(trial_number):
     for epoch in range(start_epoch, args.epochs):
         state['lr'] = scheduler.get_last_lr()[0]
 
-        train_loss, train_acc = train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, epoch, use_cuda, device)
-        test_loss, test_acc = test(testloader, s_model, ce_criterion, epoch, use_cuda, device)
+        train_loss, train_acc = train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, use_cuda, device)
+        test_loss, test_acc = test(testloader, s_model, ce_criterion, use_cuda, device)
 
         # append logger file
         logger.append([state['lr'], train_loss, test_loss, train_acc, test_acc])
@@ -231,7 +229,7 @@ def main(trial_number):
     best_checkpoint = os.path.join(args.checkpoint, f'trial_{trial_number}', 'model_best.pth.tar')
     return best_acc, best_checkpoint
 
-def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, epoch, use_cuda, device):
+def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, use_cuda, device):
     # switch to train mode
     s_model.train()
 
@@ -245,7 +243,7 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
     top5 = AverageMeter()
     end = time.time()
 
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
+    for _, (inputs, targets) in enumerate(trainloader):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -284,7 +282,7 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
 
     return (ce_losses.avg, top1.avg)
 
-def test(testloader, model, criterion, epoch, use_cuda, device):
+def test(testloader, model, criterion, use_cuda, device):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -295,7 +293,7 @@ def test(testloader, model, criterion, epoch, use_cuda, device):
     model.eval()
 
     end = time.time()
-    for batch_idx, (inputs, targets) in enumerate(testloader):
+    for _, (inputs, targets) in enumerate(testloader):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -326,16 +324,16 @@ def save_checkpoint(state, is_best, trial_number, checkpoint='checkpoint', filen
     if is_best:
         shutil.copyfile(filepath, os.path.join(trial_path, 'model_best.pth.tar'))
 
-def suggest_hyperparameters(trial):
+if __name__ == '__main__':
+    trial = study.ask()
+    trial_number = trial.number
+    
     args.lr = trial.suggest_loguniform('lr', 0.001, 1.0)
     args.weight_decay = trial.suggest_loguniform('weight_decay', 0.00001, 0.01)
     args.momentum = trial.suggest_loguniform('momentum', 0.001, 1.0)
     args.train_batch = trial.suggest_int('batch', 64, 256)
-
-if __name__ == '__main__':
-    trial = study.ask()
-    trial_number = trial.number
-    suggest_hyperparameters(trial)
+    if trial.number >= args.warmup_trials:
+        args.alpha = trial.suggest_float('alpha', 0.0, 1.0)
 
     acc, checkpoint_path = main(trial_number)
 
@@ -347,20 +345,18 @@ if __name__ == '__main__':
     best_trial = study.best_trial
 
     text = (
-        f"[Trial {trial.number}] "
+        f"[Current Result, Trial {trial.number}] "
         f"LR={args.lr:.6f}, "
         f"Weight Decay={args.weight_decay:.4f}, "
         f"Momentum={args.momentum:.4f}, "
         f"Train Batch={args.train_batch}"
     )
-    if trial.number > args.warmup_trials:
+    if trial.number >= args.warmup_trials:
         text += f", Alpha={args.alpha:.2f}"
 
     text += (
-        f" | [Current Result] "
-        f"Trial Number: {trial_number} / {args.num_total_trial}, "
-        f"ACC: {acc:.4f} | [Best Result] "
-        f"Trial {best_trial.number}, ACC: {best_trial.value:.4f}"
+        f" ACC: {acc:.4f} | [Best Result, Trial {best_trial.number}] "
+        f"ACC: {best_trial.value:.4f}"
     )
 
     print(text)

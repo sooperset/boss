@@ -88,7 +88,6 @@ parser.add_argument('--study-name', default='cifar_study', type=str)
 parser.add_argument('--storage-path', default='sqlite:///optuna_cifar.db', type=str)
 
 # BOSS-specific arguments
-parser.add_argument('--num-total-trial', default=128, type=int)
 parser.add_argument('--warmup-trials', default=32, type=int)
 parser.add_argument('--pretrained-mode', action='store_true')
 
@@ -193,6 +192,10 @@ def main(trial_number):
 
             # Print loaded paths
             print(f"[Trial {trial.number}] Loaded student model ({s_trial_ckpt_path.split('/')[-2]}) and teacher model ({t_trial_ckpt_path.split('/')[-2]}). Alpha: {args.alpha:.2f}")
+
+            args.epochs = args.epochs // 2
+            print(f"[Trial {trial.number}] Epochs halved to {args.epochs} for pretrained mode.")
+
         else:
             # Load a random teacher model
             trial_random = random.Random(trial_number)

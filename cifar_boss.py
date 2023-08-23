@@ -61,9 +61,10 @@ def main():
 
     # Initialize a list to hold the subprocesses for each GPU
     processes = [None] * num_gpus
+    trial_num = 0
 
     # Loop through the total trials
-    for trial_num in range(args.num_total_trial):
+    while trial_num < args.num_total_trial:
         is_warmup_trial = True if trial_num < args.num_warmup_trial else False
 
         # Define study name based on the trial phase (warmup or boss)
@@ -77,6 +78,7 @@ def main():
                     is_warmup_trial = trial_num < args.num_warmup_trial
                     processes[i] = run_trial(i, args.manualSeed, current_study_name, args.storage_path, args.arch,
                                              args.dataset, args.workers, is_warmup_trial, args.pretrained_mode)
+                    trial_num += 1
         time.sleep(1)  # Sleep for a second between trial launches
 
 

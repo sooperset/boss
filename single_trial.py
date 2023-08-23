@@ -88,8 +88,8 @@ parser.add_argument('--study-name', default='cifar_study', type=str)
 parser.add_argument('--storage-path', default='sqlite:///optuna_cifar.db', type=str)
 
 # BOSS-specific arguments
-parser.add_argument('--is-warmup-trial', default=False, type=bool)
-parser.add_argument('--pretrained-mode', action='store_true')
+parser.add_argument('--is-warmup-trial', default=False, action='store_true')
+parser.add_argument('--pretrained-mode', default=False, action='store_true')
 
 args = parser.parse_args()
 state = {k: v for k, v in args._get_kwargs()}
@@ -110,7 +110,9 @@ if use_cuda:
     torch.cuda.manual_seed_all(args.manualSeed)
 
 # Attempt to load an existing optuna study
-study = optuna.load_study(study_name=args.study_name, storage=args.storage_path)
+warmup_study = optuna.load_study(study_name=f'{args.study_name}_warmup', storage=args.storage_path)
+boss_study = optuna.load_study(study_name=f'{args.study_name}_boss', storage=args.storage_path)
+study = warmup_study if args.is_warmup_trial else boss_study    
 
 def main(trial_number):
     best_acc = 0
@@ -169,7 +171,9 @@ def main(trial_number):
         import random
 
         # Get completed trials and sort by score
-        completed_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
+        completed_trials_from_warmup = warmup_study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
+        completed_trials_from_boss = boss_study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
+        completed_trials = completed_trials_from_warmup + completed_trials_from_boss
         top_k_trials = sorted(completed_trials, key=lambda x: x.user_attrs["score"], reverse=True)[:args.top_k]
         top_k_checkpoint_paths = [trial.user_attrs["checkpoint_path"] for trial in top_k_trials]
 

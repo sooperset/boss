@@ -5,13 +5,14 @@ import argparse
 import torch
 
 
-def run_trial(gpu_id: int, seed: int, current_study_name: str, storage_path: str, arch: str, dataset: str,
+def run_trial(gpu_id: int, seed: int, study_name: str, storage_path: str, arch: str, dataset: str,
               workers: int, is_warmup_trial: bool, pretrained_mode: bool) -> subprocess.Popen:
     """Run a single trial on a specified GPU with given parameters."""
     pretrained_flag = "--pretrained-mode" if pretrained_mode else ""
+    is_warmup_trial_flag = "--is-warmup-trial" if is_warmup_trial else ""
     command = (f"python single_trial.py -a {arch} -d {dataset} --manualSeed={seed} --workers={workers} "
-               f"--gpu-id={gpu_id} --study-name={current_study_name} --storage={storage_path} "
-               f"--is-warmup-trial={is_warmup_trial} {pretrained_flag}")
+               f"--gpu-id={gpu_id} --study-name={study_name} --storage={storage_path} "
+               f"{is_warmup_trial_flag} {pretrained_flag}")
     return subprocess.Popen(command, shell=True)
 
 
@@ -65,10 +66,7 @@ def main():
 
     # Loop through the total trials
     while trial_num < args.num_total_trial:
-        is_warmup_trial = True if trial_num < args.num_warmup_trial else False
-
         # Define study name based on the trial phase (warmup or boss)
-        current_study_name = f'{args.study_name}_warmup' if is_warmup_trial else f'{args.study_name}_boss'
 
         # Loop through GPUs and launch trials
         for i in range(num_gpus):
@@ -76,7 +74,7 @@ def main():
             if process is None or process.poll() is not None:
                 if trial_num < args.num_total_trial:
                     is_warmup_trial = trial_num < args.num_warmup_trial
-                    processes[i] = run_trial(i, args.manualSeed, current_study_name, args.storage_path, args.arch,
+                    processes[i] = run_trial(i, args.manualSeed, args.study_name, args.storage_path, args.arch,
                                              args.dataset, args.workers, is_warmup_trial, args.pretrained_mode)
                     trial_num += 1
         time.sleep(1)  # Sleep for a second between trial launches

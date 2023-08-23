@@ -36,7 +36,7 @@ sudo apt-get update && sudo apt-get install sqlite3 libsqlite3-dev
 
 ```bash
 python cifar.py --arch vgg16_bn --dataset cifar100  # baseline
-python cifar_boss.py --arch vgg16_bn --dataset cifar100  # BOSS
+python cifar_boss.py --arch vgg16_bn --dataset cifar100 --pretrained-mode  # BOSS
 ```
 
 ## Acknowledgement

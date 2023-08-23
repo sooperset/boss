@@ -88,7 +88,7 @@ parser.add_argument('--study-name', default='cifar_study', type=str)
 parser.add_argument('--storage-path', default='sqlite:///optuna_cifar.db', type=str)
 
 # BOSS-specific arguments
-parser.add_argument('--warmup-trials', default=32, type=int)
+parser.add_argument('--is-warmup-trial', default=False, type=bool)
 parser.add_argument('--pretrained-mode', action='store_true')
 
 args = parser.parse_args()
@@ -116,7 +116,7 @@ def main(trial_number):
     best_acc = 0
     start_epoch = args.start_epoch
 
-    is_warmup_trial = trial_number < args.warmup_trials
+    is_warmup_trial = args.is_warmup_trial
     is_pretrained_mode = args.pretrained_mode
 
     trial_path = os.path.join(args.checkpoint, f'trial_{trial_number}')
@@ -275,7 +275,7 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
         ce_loss = ce_criterion(s_outputs, targets)
 
         # After warmup trials, compute teacher model's output and calculate consistency loss
-        if t_model:
+        if not args.is_warmup_trial:
             with torch.no_grad():
                 t_outputs = t_model(inputs)
             consist_loss = consist_criterion(s_outputs, t_outputs)
@@ -355,7 +355,7 @@ if __name__ == '__main__':
     args.train_batch = trial.suggest_int('batch', 64, 256)
 
     # Suggest alpha hyperparameter if it's not a warmup trial
-    if trial.number >= args.warmup_trials:
+    if not args.is_warmup_trial:
         args.alpha = trial.suggest_float('alpha', 0.0, 1.0)
 
     # Run the main trial function
@@ -374,7 +374,7 @@ if __name__ == '__main__':
     text += f"LR={args.lr:.6f}, Weight Decay={args.weight_decay:.4f}, "
     text += f"Momentum={args.momentum:.4f}, Train Batch={args.train_batch}"
 
-    if trial.number >= args.warmup_trials:
+    if not args.is_warmup_trial:
         text += f", Alpha={args.alpha:.2f}"
 
     text += f" ACC: {acc:.4f} | [Best Result, Trial {best_trial.number}] ACC: {best_trial.value:.4f}"

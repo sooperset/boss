@@ -6,7 +6,6 @@ import shutil
 import time
 import random
 import optuna
-from copy import deepcopy
 
 import torch
 import torch.nn as nn
@@ -33,7 +32,7 @@ parser.add_argument('-d', '--dataset', default='cifar100', type=str)
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 # Optimization options
-parser.add_argument('--epochs', default=1, type=int, metavar='N',
+parser.add_argument('--epochs', default=164, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -65,8 +64,6 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='vgg16_bn',
                         ' (default: vgg16_bn)')
 # Miscs
 parser.add_argument('--manualSeed', type=int, help='manual seed')
-parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
-                    help='evaluate model on validation set')
 
 #Device options
 parser.add_argument('--gpu-id', default='0', type=str,
@@ -155,9 +152,8 @@ def main(trial_number):
         raise NotImplementedError
 
     device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
-
-    s_model = deepcopy(model).to(device)
-    t_model = None
+    s_model = models.__dict__[args.arch](num_classes=num_classes).to(device)
+    t_model = None if is_warmup_trial else models.__dict__[args.arch](num_classes=num_classes).to(device)
 
     # Logic for non-warmup trials
     if not is_warmup_trial:
@@ -170,11 +166,9 @@ def main(trial_number):
         top_k_trials = sorted(completed_trials, key=lambda x: x.user_attrs["score"], reverse=True)[:args.top_k]
         top_k_checkpoint_paths = [trial.user_attrs["checkpoint_path"] for trial in top_k_trials]
 
-        t_model = deepcopy(model)
-
+        trial_random = random.Random(trial_number)
         if is_pretrained_mode:
             # Select two random IDs for student and teacher models
-            trial_random = random.Random(trial_number)
             selected_ids = trial_random.sample(range(len(top_k_checkpoint_paths)), 2)
 
             # Load the student model
@@ -188,17 +182,15 @@ def main(trial_number):
             t_model.load_state_dict(t_state_dict)
 
             # Print loaded paths
-            print(f"[BOSS / Trial {trial.number}] Loaded student model ({'/'.join(s_trial_ckpt_path.split('/')[-3:-1])}) and teacher model ({'/'.join(t_trial_ckpt_path.split('/')[-3:-1])}). Alpha: {args.alpha:.2f}")
+            print(f"[BOSS / Trial {trial.number:2d}] Loaded student model ({'/'.join(s_trial_ckpt_path.split('/')[-3:-1])}) and teacher model ({'/'.join(t_trial_ckpt_path.split('/')[-3:-1])}). Alpha: {args.alpha:.2f}")
         else:
             # Load a random teacher model
-            trial_random = random.Random(trial_number)
             t_trial_ckpt_path = trial_random.choice(top_k_checkpoint_paths)
             t_state_dict = torch.load(t_trial_ckpt_path)['state_dict']
             t_model.load_state_dict(t_state_dict)
 
             # Print loaded path
-            print(f"[BOSS / Trial {trial.number}] Loaded teacher model ({'/'.join(t_trial_ckpt_path.split('/')[-3:-1])}). Alpha: {args.alpha:.2f}")
-        t_model = t_model.to(device)
+            print(f"[BOSS / Trial {trial.number:2d}] Loaded teacher model ({'/'.join(t_trial_ckpt_path.split('/')[-3:-1])}). Alpha: {args.alpha:.2f}")
 
     cudnn.benchmark = True
 
@@ -227,7 +219,7 @@ def main(trial_number):
         best_acc = max(test_acc, best_acc)
         save_checkpoint({
                 'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
+                'state_dict': s_model.state_dict(),
                 'acc': test_acc,
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
@@ -361,14 +353,14 @@ if __name__ == '__main__':
     best_trial = study.best_trial
 
     # Construct and print result summary
-    text = f"[WarmUp / Trial {trial.number}] " if args.is_warmup_trial else f"[BOSS / Trial {trial.number}] "
+    text = f"[WarmUp / Trial {trial.number:2d}] " if args.is_warmup_trial else f"[BOSS / Trial {trial.number:2d}] "
     text += f"LR={args.lr:.6f}, Weight Decay={args.weight_decay:.4f}, "
     text += f"Momentum={args.momentum:.4f}, Batch={args.train_batch}"
 
     if not args.is_warmup_trial:
         text += f", Alpha={args.alpha:.2f}"
 
-    text += f" ACC: {acc:.4f} | Best - [{'WarmUp' if args.is_warmup_trial else 'BOSS'} / Trial {best_trial.number}] ACC: {best_trial.value:.4f}"
+    text += f" ACC: {acc:.4f} | Best - [{'WarmUp' if args.is_warmup_trial else 'BOSS'} / Trial {best_trial.number:2d}] ACC: {best_trial.value:.4f}"
     
 
     print(text)

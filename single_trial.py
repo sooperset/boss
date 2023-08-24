@@ -33,7 +33,7 @@ parser.add_argument('-d', '--dataset', default='cifar100', type=str)
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 # Optimization options
-parser.add_argument('--epochs', default=164, type=int, metavar='N',
+parser.add_argument('--epochs', default=1, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -121,7 +121,7 @@ def main(trial_number):
     is_warmup_trial = args.is_warmup_trial
     is_pretrained_mode = args.pretrained_mode
 
-    trial_path = os.path.join(args.checkpoint, f'trial_{trial_number}')
+    trial_path = os.path.join(args.checkpoint, 'warmup' if is_warmup_trial else 'boss', f'trial_{trial_number}')
     if not os.path.isdir(trial_path):
         mkdir_p(trial_path)
 
@@ -195,8 +195,7 @@ def main(trial_number):
             t_model.load_state_dict(t_state_dict)
 
             # Print loaded paths
-            print(f"[Trial {trial.number}] Loaded student model ({s_trial_ckpt_path.split('/')[-2]}) and teacher model ({t_trial_ckpt_path.split('/')[-2]}). Alpha: {args.alpha:.2f}")
-
+            print(f"[BOSS / Trial {trial.number}] Loaded student model ({'/'.join(s_trial_ckpt_path.split('/')[-3:-1])}) and teacher model ({'/'.join(t_trial_ckpt_path.split('/')[-3:-1])}). Alpha: {args.alpha:.2f}")
         else:
             # Load a random teacher model
             trial_random = random.Random(trial_number)
@@ -205,8 +204,7 @@ def main(trial_number):
             t_model.load_state_dict(t_state_dict)
 
             # Print loaded path
-            print(f"[Trial {trial.number}] Loaded teacher model ({t_trial_ckpt_path.split('/')[-2]}). Alpha: {args.alpha:.2f}")
-
+            print(f"[BOSS / Trial {trial.number}] Loaded teacher model ({'/'.join(t_trial_ckpt_path.split('/')[-3:-1])}). Alpha: {args.alpha:.2f}")
         t_model = t_model.to(device)
 
     cudnn.benchmark = True
@@ -218,14 +216,14 @@ def main(trial_number):
     ce_criterion = nn.CrossEntropyLoss()
     consist_criterion = nn.MSELoss()
 
-    logger = Logger(os.path.join(args.checkpoint, f'trial_{trial_number}', 'log.txt'), title=f"{args.dataset}_{args.arch}")
+    logger = Logger(os.path.join(trial_path, 'log.txt'), title=f"{args.dataset}_{args.arch}")
     logger.set_names(['Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
 
     # Train and val
     for epoch in range(start_epoch, args.epochs):
         state['lr'] = scheduler.get_last_lr()[0]
 
-        train_loss, train_acc = train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, use_cuda, device)
+        train_loss, train_acc = train(trainloader, s_model, t_model, ce_criterion, consist_criterion, args.alpha, optimizer, is_warmup_trial, use_cuda, device)
         test_loss, test_acc = test(testloader, s_model, ce_criterion, use_cuda, device)
 
         # append logger file
@@ -240,16 +238,16 @@ def main(trial_number):
                 'acc': test_acc,
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
-            }, is_best, trial_number, checkpoint=args.checkpoint)
+            }, is_best, is_warmup_trial, trial_number, checkpoint=args.checkpoint)
 
         scheduler.step()
 
     logger.close()
 
-    best_checkpoint = os.path.join(args.checkpoint, f'trial_{trial_number}', 'model_best.pth.tar')
+    best_checkpoint = os.path.join(trial_path, 'model_best.pth.tar')
     return best_acc, best_checkpoint
 
-def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimizer, use_cuda, device):
+def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, alpha, optimizer, is_warmup_trial, use_cuda, device):
     # switch to train mode
     s_model.train()
 
@@ -276,12 +274,11 @@ def train(trainloader, s_model, t_model, ce_criterion, consist_criterion, optimi
         ce_loss = ce_criterion(s_outputs, targets)
 
         # After warmup trials, compute teacher model's output and calculate consistency loss
-        if not args.is_warmup_trial:
+        if not is_warmup_trial:
             with torch.no_grad():
                 t_outputs = t_model(inputs)
             consist_loss = consist_criterion(s_outputs, t_outputs)
 
-            alpha = args.alpha
             loss = ce_loss * alpha + (1 - alpha) * consist_loss
         else:
             loss = ce_loss
@@ -337,8 +334,8 @@ def test(testloader, model, criterion, use_cuda, device):
         end = time.time()
     return (losses.avg, top1.avg)
 
-def save_checkpoint(state, is_best, trial_number, checkpoint='checkpoint', filename='checkpoint.pth.tar'):
-    trial_path = os.path.join(checkpoint, f'trial_{trial_number}')
+def save_checkpoint(state, is_best, is_warmup_trial, trial_number, checkpoint='checkpoint', filename='checkpoint.pth.tar'):
+    trial_path = os.path.join(checkpoint, 'warmup' if is_warmup_trial else 'boss', f'trial_{trial_number}')
     mkdir_p(trial_path)
     filepath = os.path.join(trial_path, filename)
     torch.save(state, filepath)
@@ -371,13 +368,14 @@ if __name__ == '__main__':
     best_trial = study.best_trial
 
     # Construct and print result summary
-    text = f"[Current Result, Trial {trial.number}] "
+    text = f"[WarmUp / Trial {trial.number}] " if args.is_warmup_trial else f"[BOSS / Trial {trial.number}] "
     text += f"LR={args.lr:.6f}, Weight Decay={args.weight_decay:.4f}, "
-    text += f"Momentum={args.momentum:.4f}, Train Batch={args.train_batch}"
+    text += f"Momentum={args.momentum:.4f}, Batch={args.train_batch}"
 
     if not args.is_warmup_trial:
         text += f", Alpha={args.alpha:.2f}"
 
-    text += f" ACC: {acc:.4f} | [Best Result, Trial {best_trial.number}] ACC: {best_trial.value:.4f}"
+    text += f" ACC: {acc:.4f} | Best - [{'WarmUp' if args.is_warmup_trial else 'BOSS'} / Trial {best_trial.number}] ACC: {best_trial.value:.4f}"
+    
 
     print(text)

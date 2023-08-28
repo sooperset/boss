@@ -1,74 +1,61 @@
-# pytorch-classification
-Classification on CIFAR-10/100 and ImageNet with PyTorch.
+# Bayesian Optimization Meets Self-Distillation: BOSS (ICCV 2023)
 
-## Features
-* Unified interface for different network architectures
-* Multi-GPU support
-* Training progress bar with rich info
-* Training log and training curve visualization code (see `./utils/logger.py`)
+[**HyunJae Lee***](https://scholar.google.com/citations?&user=m2mp1A8AAAAJ), [**Heon Song***](https://scholar.google.com/citations?&user=r_TfBoEAAAAJ), [**Hyeonsoo Lee***](https://scholar.google.com/citations?&user=BV-AwjoAAAAJ), **Gi-hyeon Lee**, **Suyeong Park**, [**Donggeun Yoo**](https://scholar.google.com/citations?user=10f-fEYAAAAJ).
+*Equal Contribution
 
-## Install
-* Install [PyTorch](http://pytorch.org/)
-* Clone recursively
-  ```
-  git clone --recursive https://github.com/bearpaw/pytorch-classification.git
-  ```
+**Lunit Inc.**  
 
-## Training
-Please see the [Training recipes](TRAINING.md) for how to train the models.
+This is the official PyTorch implementation of the BOSS framework, presented at ICCV 2023. For technical details, please refer to:
 
-## Results
+**Bayesian Optimization Meets Self-Distillation**  
+[Paper Link](https://arxiv.org/abs/2304.12666)  
+ICCV 2023
 
-### CIFAR
-Top1 error rate on the CIFAR-10/100 benchmarks are reported. You may get different results when training your models with different random seed.
-Note that the number of parameters are computed on the CIFAR-10 dataset.
+![Overview](utils/images/method.png)
 
-| Model                     | Params (M)         |  CIFAR-10 (%)      | CIFAR-100 (%)      |
-| -------------------       | ------------------ | ------------------ | ------------------ |
-| alexnet                   | 2.47               | 22.78              | 56.13              |
-| vgg19_bn                  | 20.04              | 6.66               | 28.05              |
-| ResNet-110                | 1.70               | 6.11               | 28.86              |
-| PreResNet-110             | 1.70               | 4.94               | 23.65              |
-| WRN-28-10 (drop 0.3)      | 36.48              | 3.79               | 18.14              |
-| ResNeXt-29, 8x64          | 34.43              | 3.69               | 17.38              |
-| ResNeXt-29, 16x64         | 68.16              | 3.53               | 17.30              |
-| DenseNet-BC (L=100, k=12) | 0.77               | 4.54               | 22.88              |
-| DenseNet-BC (L=190, k=40) | 25.62              | 3.32               | 17.17              |
+## Introduction
 
+Bayesian optimization (BO) has contributed greatly to improving model performance by suggesting promising hyperparameter configurations iteratively based on observations from multiple training trials. However, only partial knowledge (i.e., the measured performances of trained models and their hyperparameter configurations) from previous trials is transferred.
 
-![cifar](utils/images/cifar.png)
+On the other hand, Self-Distillation (SD) only transfers partial knowledge learned by the task model itself. To fully leverage the various knowledge gained from all training trials, we propose the BOSS framework, which combines BO and SD. BOSS suggests promising hyperparameter configurations through BO and carefully selects pre-trained models from previous trials for SD, which are otherwise abandoned in the conventional BO process.
 
-### ImageNet
-Single-crop (224x224) validation error rate is reported. 
+BOSS achieves significantly better performance than both BO and SD in a wide range of tasks including general image classification, learning with noisy labels, semi-supervised learning, and medical image analysis tasks.
 
+## Environment Setup
 
-| Model                | Params (M)         |  Top-1 Error (%)   | Top-5 Error  (%)   |
-| -------------------  | ------------------ | ------------------ | ------------------ |
-| ResNet-18            | 11.69              |  30.09             | 10.78              |
-| ResNeXt-50 (32x4d)   | 25.03              |  22.6              | 6.29               |
+The code has been run and tested on Ubuntu 18.04, Python 3.8, Pytorch 1.8.1, CUDA 11.1, 8 x RTX 2080Ti GPUs.
 
-![Validation curve](utils/images/imagenet.png)
+### Install Python Packages
 
-## Pretrained models
-Our trained models and training logs are downloadable at [OneDrive](https://mycuhk-my.sharepoint.com/personal/1155056070_link_cuhk_edu_hk/_layouts/15/guestaccess.aspx?folderid=0a380d1fece1443f0a2831b761df31905&authkey=Ac5yBC-FSE4oUJZ2Lsx7I5c).
+```shell script
+pip install -r requirements.txt
+sudo apt-get update && sudo apt-get install sqlite3 libsqlite3-dev
+```
 
-## Supported Architectures
+### Training and Evaluation
 
-### CIFAR-10 / CIFAR-100
-Since the size of images in CIFAR dataset is `32x32`, popular network structures for ImageNet need some modifications to adapt this input size. The modified models is in the package `models.cifar`:
-- [x] [AlexNet](https://arxiv.org/abs/1404.5997)
-- [x] [VGG](https://arxiv.org/abs/1409.1556) (Imported from [pytorch-cifar](https://github.com/kuangliu/pytorch-cifar))
-- [x] [ResNet](https://arxiv.org/abs/1512.03385)
-- [x] [Pre-act-ResNet](https://arxiv.org/abs/1603.05027)
-- [x] [ResNeXt](https://arxiv.org/abs/1611.05431) (Imported from [ResNeXt.pytorch](https://github.com/prlz77/ResNeXt.pytorch))
-- [x] [Wide Residual Networks](http://arxiv.org/abs/1605.07146) (Imported from [WideResNet-pytorch](https://github.com/xternalz/WideResNet-pytorch))
-- [x] [DenseNet](https://arxiv.org/abs/1608.06993)
+```bash
+python cifar.py --arch vgg16_bn --dataset cifar100 --manualSeed 888  # baseline
+python cifar_boss.py --arch vgg16_bn --dataset cifar100 --pretrained-mode --manualSeed 888  # BOSS
+```
 
-### ImageNet
-- [x] All models in `torchvision.models` (alexnet, vgg, resnet, densenet, inception_v3, squeezenet)
-- [x] [ResNeXt](https://arxiv.org/abs/1611.05431)
-- [ ] [Wide Residual Networks](http://arxiv.org/abs/1605.07146)
+## Acknowledgement
 
+- **PyTorch Classification**: Our codebase utilizes the [PyTorch Classification](https://github.com/bearpaw/pytorch-classification) repository for training and evaluation. Special thanks to the authors for their contribution.
 
-## Contribute
-Feel free to create a pull request if you find any bugs or you want to contribute (e.g., more datasets and more network structures).
+## Citation
+
+If you use this code in your research, please cite the following paper:
+
+```bibtex
+@article{lee2023bayesian,
+  title={Bayesian Optimization Meets Self-Distillation},
+  author={Lee, HyunJae and Song, Heon and Lee, Hyeonsoo and Lee, Gi-hyeon and Park, Suyeong and Yoo, Donggeun},
+  journal={arXiv preprint arXiv:2304.12666},
+  year={2023}
+}
+```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE.md](LICENSE.md) file for details.
